@@ -1,0 +1,55 @@
+import cv2
+import os
+import time
+
+# ==========================================
+# 1. TUKAR NAMA BUAH DI SINI SEBELUM MULA
+# ==========================================
+# Kalau nak ambil gambar Epal, tulis: "epal"
+# Kalau nak ambil gambar Oren, tukar jadi: "oren"
+NAMA_BUAH = "epal" 
+
+# Folder simpan gambar (Auto create di Desktop)
+FOLDER_SIMPAN = f"/home/pi/Desktop/dataset/{NAMA_BUAH}"
+
+# Cipta folder kalau belum wujud
+if not os.path.exists(FOLDER_SIMPAN):
+    os.makedirs(FOLDER_SIMPAN)
+    print(f"Folder '{NAMA_BUAH}' dah sedia di Desktop!")
+
+# Setup Kamera (0 = Webcam USB)
+cap = cv2.VideoCapture(0)
+cap.set(3, 640) # Lebar
+cap.set(4, 480) # Tinggi
+
+count = 0
+print("--- CARA GUNA ---")
+print("1. Tekan kekunci 'S' untuk Simpan Gambar")
+print("2. Tekan kekunci 'Q' untuk Keluar")
+
+while True:
+    success, img = cap.read()
+    if not success:
+        print("Kamera tak jumpa! Cucuk betul-betul.")
+        break
+
+    # Tunjuk video live
+    cv2.imshow("Kamera Pengumpul Data", img)
+    
+    # Baca keyboard
+    key = cv2.waitKey(1) & 0xFF
+
+    # --- TEKAN 'S' UNTUK SNAP ---
+    if key == ord('s'):
+        timestamp = int(time.time())
+        filename = f"{FOLDER_SIMPAN}/{NAMA_BUAH}_{timestamp}.jpg"
+        cv2.imwrite(filename, img)
+        print(f"Gambar Disimpan: {filename} (Total: {count+1})")
+        count += 1
+        
+    # --- TEKAN 'Q' UNTUK KELUAR ---
+    elif key == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
