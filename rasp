@@ -1,0 +1,64 @@
+import cv2
+import os
+import sys
+import time
+from edge_impulse_linux.image import ImageImpulseRunner
+
+# ⚠️ PENTING: TUKAR NAMA FAIL BAWAH NI IKUT NAMA FAIL .eim KAU ⚠️
+modelfile = "NAMA_FAIL_KAU.eim"
+
+# Semak kalau fail .eim ada dalam folder
+if not os.path.exists(modelfile):
+    print(f"Error: Fail {modelfile} tak jumpa! Pastikan nama betul dan ada dalam folder yang sama.")
+    sys.exit(1)
+
+# Initialize model AI
+runner = ImageImpulseRunner(modelfile)
+
+try:
+    model_info = runner.init()
+    print('Berjaya load model AI!')
+
+    # Buka webcam (0 biasanya untuk USB webcam pertama)
+    cap = cv2.VideoCapture(0)
+    time.sleep(1) # Bagi kamera masa sikit untuk on
+
+    print("Kamera dah on. Letak buah kat depan. Tekan 'q' pada tetingkap video untuk berhenti.")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Gagal dapatkan gambar dari webcam. Cuba check connection USB.")
+            break
+
+        # Hantar gambar ke model AI
+        features, cropped = runner.get_features_from_image(frame)
+        res = runner.classify(features)
+
+        # Kalau model AI jumpa objek
+        if "bounding_boxes" in res["result"]:
+            for bb in res["result"]["bounding_boxes"]:
+                label = bb['label']
+                accuracy = bb['value']
+
+                # Filter supaya detect yang akurasi 70% ke atas je
+                if accuracy > 0.7:
+                    print(f"Jumpa: {label} (Yakin: {accuracy:.2f})")
+                    x, y, w, h = bb['x'], bb['y'], bb['width'], bb['height']
+                    
+                    # Lukis kotak hijau dan nama buah
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{label}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Tunjuk video kat skrin
+        cv2.imshow('AI Webcam Test', frame)
+
+        # Tekan 'q' kat keyboard untuk tutup
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+finally:
+    if runner:
+        runner.stop()
+    cap.release()
+    cv2.destroyAllWindows()
