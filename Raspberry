@@ -112,3 +112,85 @@ finally:
     GPIO.cleanup()
     cv2.destroyAllWindows()
     runner.stop()
+
+
+
+
+
+import cv2
+import os
+import sys
+import RPi.GPIO as GPIO
+from RPLCD.i2c import CharLCD
+from edge_impulse_linux.image import ImageImpulseRunner
+
+# --- 1. SETUP HARDWARE ---
+LED_PIN = 18
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+GPIO.setup(LED_PIN, GPIO.OUT)
+
+# Setup LCD
+try:
+    lcd = CharLCD('PCF8574', 0x27) # Tukar 0x3f kalau perlu
+    lcd.clear()
+    lcd.write_string("Sistem Ready...")
+except:
+    print("LCD tak dikesan!")
+
+# --- 2. SETUP AI ---
+modelfile = "/home/iskandar/kesan_telur.eim"
+runner = ImageImpulseRunner(modelfile)
+model_info = runner.init()
+print("AI Model Berjaya Load!")
+
+# --- 3. MULAKAN OPENCV ---
+cap = cv2.VideoCapture(0)
+
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Gagal ambil gambar dari kamera!")
+            break
+
+        # Tukar gambar ke format yang AI faham
+        features, cropped = runner.get_features_from_image(frame)
+        
+        # Proses AI
+        res = runner.classify(features)
+        
+        found = False
+        if "bounding_boxes" in res["result"]:
+            for bb in res["result"]["bounding_boxes"]:
+                if bb['value'] > 0.6: # Confidence 60%
+                    label = bb['label']
+                    score = bb['value']
+                    found = True
+                    
+                    # Lukis kotak pada video (OpenCV)
+                    x, y, w, h = bb['x'], bb['y'], bb['width'], bb['height']
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{label} {score:.2f}", (x, y-10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    
+                    # Update LCD & LED
+                    lcd.clear()
+                    lcd.write_string(f"Objek: {label}")
+                    GPIO.output(LED_PIN, GPIO.HIGH)
+                    print(f"Jumpa: {label}")
+
+        if not found:
+            GPIO.output(LED_PIN, GPIO.LOW)
+
+        # Tunjuk video guna OpenCV
+        cv2.imshow('AI Sorting Project', frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+finally:
+    GPIO.cleanup()
+    cap.release()
+    cv2.destroyAllWindows()
+    runner.stop()
