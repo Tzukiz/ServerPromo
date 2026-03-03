@@ -53,3 +53,74 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+
+
+
+
+import cv2
+import os
+import sys
+import RPi.GPIO as GPIO
+from RPLCD.i2c import CharLCD
+from edge_impulse_linux.image import ImageImpulseRunner
+
+# --- 1. SETUP HARDWARE ---
+LED_PIN = 18
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+GPIO.setup(LED_PIN, GPIO.OUT)
+GPIO.output(LED_PIN, GPIO.LOW)
+
+# Setup LCD (Guna 0x27 atau 0x3f)
+try:
+    lcd = CharLCD('PCF8574', 0x27)
+    lcd.clear()
+    lcd.write_string("Sistem AI Ready")
+except Exception as e:
+    print(f"LCD tak jumpa! Check wiring/reboot: {e}")
+
+# --- 2. SETUP AI ---
+# Pastikan PATH fail .eim ni betul!
+modelfile = "/home/iskandar/kesan_telur.eim"
+
+runner = ImageImpulseRunner(modelfile)
+model_info = runner.init()
+print("AI Model Berjaya Load!")
+
+# Guna ID kamera terus (0 untuk USB webcam)
+video_device_id = 0 
+
+try:
+    # Kita panggil classifier guna ID, bukan objek 'cap' terus
+    for res, img in runner.classifier(video_device_id):
+        found = False
+        
+        if "bounding_boxes" in res["result"]:
+            for bb in res["result"]["bounding_boxes"]:
+                if bb['value'] > 0.6: # Yakin lebih 60%
+                    label = bb['label']
+                    score = bb['value']
+                    found = True
+                    
+                    # Update LCD & LED
+                    lcd.clear()
+                    lcd.write_string(f"Objek: {label}")
+                    lcd.cursor_pos = (1, 0)
+                    lcd.write_string(f"Yakin: {int(score*100)}%")
+                    
+                    GPIO.output(LED_PIN, GPIO.HIGH)
+                    print(f"Jumpa: {label} ({score:.2f})")
+
+        if not found:
+            GPIO.output(LED_PIN, GPIO.LOW)
+
+        cv2.imshow('AI Hardware Test', img)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+finally:
+    GPIO.output(LED_PIN, GPIO.LOW)
+    GPIO.cleanup()
+    cv2.destroyAllWindows()
+    if runner:
+        runner.stop()
