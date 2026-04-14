@@ -5,28 +5,25 @@ import time
 from edge_impulse_linux.image import ImageImpulseRunner
 from RPLCD.i2c import CharLCD
 
-# --- 1. KONFIGURASI HARDWARE ---
-# Pin Motor NEMA 17
+# --- 1. SETUP HARDWARE ---
 PUL_PIN = 17 
 DIR_PIN = 27 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(PUL_PIN, GPIO.OUT)
 GPIO.setup(DIR_PIN, GPIO.OUT)
 
-# Konfigurasi LCD I2C (Address 0x27)
 try:
     lcd = CharLCD('PCF8574', 0x27)
     lcd.clear()
     lcd.write_string("Sistem Ready...")
 except:
-    print("LCD tidak dikesan. Sila periksa sambungan I2C.")
+    print("LCD tak dikesan!")
 
-# Pembolehubah Global
 latest_frame = None
-latest_result = "Scanning..."
+latest_result = "Mencari..."
 is_running = True
 
-# --- THREAD 1: PENGURUSAN KAMERA (SMOOTH) ---
+# --- THREAD 1: KAMERA ---
 class CameraStream:
     def __init__(self):
         self.stream = cv2.VideoCapture(0)
@@ -51,15 +48,18 @@ class CameraStream:
         self.stopped = True
         self.stream.release()
 
-# --- THREAD 2: LOGIK AI & KAWALAN MOTOR ---
+# --- THREAD 2: AI & MOTOR (DEBUG VERSION) ---
 def ai_logic_thread(model_path):
     global latest_result, latest_frame, is_running
     
     with ImageImpulseRunner(model_path) as runner:
-        runner.init()
+        model_info = runner.init()
+        # CETAK LABEL YANG ADA DALAM MODEL KAU KAT SHELL
+        print(f"Model sedia! Label yang dikesan: {model_info['model_parameters']['labels']}")
+        
         while is_running:
             if latest_frame is not None:
-                # Gerakkan konveyor untuk mencari barang
+                # Gerak motor sikit
                 GPIO.output(DIR_PIN, GPIO.HIGH)
                 for _ in range(400): 
                     GPIO.output(PUL_PIN, GPIO.HIGH)
@@ -67,40 +67,41 @@ def ai_logic_thread(model_path):
                     GPIO.output(PUL_PIN, GPIO.LOW)
                     time.sleep(0.002)
 
-                # Proses pengecaman AI
+                # AI Fikir
                 features, _ = runner.get_features_from_image(latest_frame)
                 res = runner.classify(features)
                 
                 if "classification" in res:
                     predictions = res['classification']
-                    # Cari label dengan nilai keyakinan tertinggi
-                    label = max(predictions, key=predictions.get)
-                    score = predictions[label]
                     
-                    if score > 0.7:
-                        # Paparan keputusan pada Shell dan LCD
-                        item_found = label.upper()
-                        latest_result = f"{item_found} ({score:.2f})"
-                        
+                    # --- DEBUG: Cetak semua peratusan kat Shell ---
+                    print("\n--- Raw Data AI ---")
+                    for label, score in predictions.items():
+                        print(f"{label}: {score:.2f}")
+                    
+                    # Cari yang paling tinggi
+                    best_label = max(predictions, key=predictions.get)
+                    best_score = predictions[best_label]
+                    
+                    # KITA TURUNKAN THRESHOLD KE 0.4 BIAR DIA SENSITIF SIKIT
+                    if best_score > 0.4:
+                        latest_result = f"{best_label.upper()}"
                         lcd.clear()
-                        lcd.write_string(f"Item: {item_found}\r\nConf: {score:.2f}")
-                        print(f"Dikesan: {item_found}")
+                        lcd.write_string(f"Item: {latest_result}\nConf: {best_score:.2f}")
                     else:
                         latest_result = "Scanning..."
                         lcd.clear()
-                        lcd.write_string("Mencari barang...")
+                        lcd.write_string("Mencari...")
 
-            time.sleep(0.5) # Rehat seketika untuk CPU
+            time.sleep(0.5)
 
-# --- MAIN THREAD: PAPARAN VISUAL ---
+# --- MAIN DISPLAY ---
 def main():
-    global latest_frame, is_running
+    global latest_frame, is_running, latest_result
     
-    # Path ke fail model anda
     model_path = "/home/iskandar/Aibaru.eim"
     cam = CameraStream().start()
     
-    # Mulakan thread AI
     t_ai = threading.Thread(target=ai_logic_thread, args=(model_path,), daemon=True)
     t_ai.start()
 
@@ -109,13 +110,12 @@ def main():
         if frame is None: continue
         latest_frame = frame
         
-        # Lukis overlay maklumat pada tetingkap kamera
-        cv2.rectangle(frame, (0, 0), (320, 40), (0, 0, 0), -1)
-        color = (0, 255, 0) if "Scanning" not in latest_result else (0, 255, 255)
+        # Display overlay kat Monitor
+        cv2.rectangle(frame, (0, 0), (320, 35), (0, 0, 0), -1)
         cv2.putText(frame, f"AI: {latest_result}", (10, 25), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow('Fruit Sorting AI - Preview', frame)
+        cv2.imshow('DEBUG AI - ISKANDAR', frame)
         
         if cv2.waitKey(1) & 0xFF == ord('q'):
             is_running = False
@@ -124,8 +124,6 @@ def main():
     cam.stop()
     cv2.destroyAllWindows()
     GPIO.cleanup()
-    lcd.clear()
-    lcd.write_string("Sistem Tamat")
 
 if __name__ == "__main__":
     main()
