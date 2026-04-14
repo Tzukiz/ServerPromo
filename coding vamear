@@ -6,16 +6,15 @@ import time
 from edge_impulse_linux.image import ImageImpulseRunner
 
 # --- 1. SETUP HARDWARE (MECHATRONICS) ---
-PUL_PIN = 17  # GPIO 17 (Physical Pin 11)
-DIR_PIN = 27  # GPIO 27 (Physical Pin 13)
+PUL_PIN = 17 
+DIR_PIN = 27 
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(PUL_PIN, GPIO.OUT)
 GPIO.setup(DIR_PIN, GPIO.OUT)
 
-# Fungsi gerak slow untuk demo pelajar
 def gerak_conveyor(steps, delay=0.002):
-    GPIO.output(DIR_PIN, GPIO.HIGH) # Arah ke depan
+    GPIO.output(DIR_PIN, GPIO.HIGH)
     for _ in range(steps):
         GPIO.output(PUL_PIN, GPIO.HIGH)
         time.sleep(delay)
@@ -23,59 +22,69 @@ def gerak_conveyor(steps, delay=0.002):
         time.sleep(delay)
 
 # --- 2. SETUP AI (EDGE IMPULSE) ---
-# Pastikan nama fail .eim ni sama dengan yang kau transfer tadi
 model_file = "modelfail_anda.eim" 
 
 def main():
-    # Guna 'with' supaya runner tutup sendiri kalau error
     with ImageImpulseRunner(model_file) as runner:
         try:
             model_info = runner.init()
             print(f"Model [{model_info['project']['name']}] sedia!")
             
-            # Start Webcam USB
             videoCapture = cv2.VideoCapture(0)
+            # Set resolution rendah sikit supaya tak lag (640x480)
+            videoCapture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            videoCapture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
             while True:
-                print("\n--- Konveyor Bergerak (Mencari Buah) ---")
-                # Gerak 800 step (separuh pusingan jika microstep 1600)
+                print("\n--- Konveyor Bergerak ---")
                 gerak_conveyor(800) 
                 
-                # Berhenti sekejap untuk ambil gambar yang jelas (tak blur)
                 time.sleep(1) 
                 success, img = videoCapture.read()
                 if not success:
-                    print("Gagal akses kamera!")
                     break
 
-                # --- BAHAGIAN FIX ERROR DISINI ---
-                # Kita pecahkan tuple: features (data AI) & img_cropped (gambar)
+                # Proses AI (Fix ValueError dimension)
                 features, img_cropped = runner.get_features_from_image(img)
-                
-                # Sekarang hantar 'features' sahaja ke classify
                 res = runner.classify(features)
-                # ---------------------------------
+
+                # --- BAHAGIAN CAMERA REVIEW (VISUAL) ---
+                label_display = "Mencari..."
+                score_display = 0
 
                 if "classification" in res:
-                    print("HASIL ANALISIS AI:")
-                    # Cari label yang paling tinggi peratusannya
+                    # Cari result paling tinggi
                     predictions = res['classification']
-                    for label, value in predictions.items():
-                        print(f"- {label}: {value:.2f}")
-                        
-                        # Logik sorting: Jika keyakinan lebih 80%
-                        if value > 0.8:
-                            print(f">>> OUTPUT: {label.upper()} DIKESAN")
+                    best_label = max(predictions, key=predictions.get)
+                    score_display = predictions[best_label]
+                    
+                    if score_display > 0.8:
+                        label_display = f"{best_label.upper()} ({score_display:.2f})"
+                        print(f">>> DETECTED: {label_display}")
+                    else:
+                        label_display = "Tiada Buah/Gagal"
 
-                # Tunggu 2 saat sebelum kitaran seterusnya
-                time.sleep(2) 
+                # Lukis kotak info atas gambar (Review)
+                cv2.rectangle(img, (0, 0), (300, 60), (0, 0, 0), -1) # Background hitam
+                cv2.putText(img, label_display, (10, 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+                # Paparkan Window Kamera
+                cv2.imshow('Projek Iskandar - Fruit Sorting AI', img)
+                
+                # Wajib ada waitKey untuk refresh window
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+                time.sleep(1) 
 
         except Exception as e:
-            print(f"Ralat berlaku: {e}")
+            print(f"Ralat: {e}")
         finally:
-            GPIO.cleanup() # Reset pin GPIO supaya tak panas
+            GPIO.cleanup()
             videoCapture.release()
-            print("Sistem ditutup dengan selamat.")
+            cv2.destroyAllWindows()
+            print("Sistem ditutup.")
 
 if __name__ == "__main__":
     main()
