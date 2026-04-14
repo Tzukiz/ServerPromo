@@ -1,15 +1,4 @@
 import cv2
-import os
-import sys
-import RPi.GPIO as GPIO
-import time
-from edge_impulse_linux.image import ImageImpulseRunner
-
-# --- 1. SETUP HARDWARE (MECHATRONICS) ---
-PUL_PIN = 17 
-DIR_PIN = 27 
-
-GPIO.setmode(GPIO.BCM)import cv2
 import threading
 import RPi.GPIO as GPIO
 import time
@@ -22,163 +11,101 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(PUL_PIN, GPIO.OUT)
 GPIO.setup(DIR_PIN, GPIO.OUT)
 
-# Variable global untuk simpan hasil AI & Frame terbaru
-latest_result = "Mencari..."
+# Global variables
 latest_frame = None
+latest_result = "Mencari..."
 is_running = True
 
-def gerak_conveyor(steps, delay=0.002):
-    GPIO.output(DIR_PIN, GPIO.HIGH)
-    for _ in range(steps):
-        GPIO.output(PUL_PIN, GPIO.HIGH)
-        time.sleep(delay)
-        GPIO.output(PUL_PIN, GPIO.LOW)
-        time.sleep(delay)
+# --- THREAD 1: CAMERA GRABBER (Laju Giler) ---
+class CameraStream:
+    def __init__(self):
+        self.stream = cv2.VideoCapture(0)
+        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+        self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        self.stream.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        (self.grabbed, self.frame) = self.stream.read()
+        self.stopped = False
 
-# --- 2. THREAD AI & LOGIK PROJEK ---
-def ai_worker_thread(model_file):
+    def start(self):
+        threading.Thread(target=self.update, args=()).start()
+        return self
+
+    def update(self):
+        while not self.stopped:
+            if not self.grabbed:
+                self.stop()
+            else:
+                (self.grabbed, self.frame) = self.stream.read()
+
+    def read(self):
+        return self.frame
+
+    def stop(self):
+        self.stopped = True
+        self.stream.release()
+
+# --- THREAD 2: AI & MOTOR (Otak Projek) ---
+def ai_logic_thread(model_file):
     global latest_result, latest_frame, is_running
     
     with ImageImpulseRunner(model_file) as runner:
         runner.init()
         while is_running:
             if latest_frame is not None:
-                # Gerak motor dulu
-                gerak_conveyor(400) # Gerak sikit-sikit
-                
-                # Proses AI (Fix ValueError dimension)
-                features, img_cropped = runner.get_features_from_image(latest_frame)
+                # 1. Gerak Motor NEMA 17
+                GPIO.output(DIR_PIN, GPIO.HIGH)
+                for _ in range(400): # Gerak sikit
+                    GPIO.output(PUL_PIN, GPIO.HIGH)
+                    time.sleep(0.002) # Speed delay yang kau nak tadi
+                    GPIO.output(PUL_PIN, GPIO.LOW)
+                    time.sleep(0.002)
+
+                # 2. Proses AI
+                features, _ = runner.get_features_from_image(latest_frame)
                 res = runner.classify(features)
                 
                 if "classification" in res:
                     predictions = res['classification']
                     best_label = max(predictions, key=predictions.get)
-                    score = predictions[best_label]
-                    
-                    if score > 0.7:
-                        latest_result = f"{best_label.upper()} ({score:.2f})"
+                    if predictions[best_label] > 0.7:
+                        latest_result = f"{best_label.upper()} ({predictions[best_label]:.2f})"
                     else:
                         latest_result = "Tiada Objek"
-                
-                time.sleep(0.1) # Rehat sikit untuk elak overheat
+            
+            time.sleep(0.1) # Rehat sikit untuk CPU Pi 4
 
-# --- 3. MAIN THREAD (CAMERA DISPLAY) ---
+# --- 3. MAIN DISPLAY (Paparan) ---
 def main():
-    global latest_frame, is_running, latest_result
+    global latest_frame, is_running
     
     model_path = "modelfail_anda.eim" # TUKAR SINI
-    videoCapture = cv2.VideoCapture(0)
+    cam = CameraStream().start()
     
-    # Rahsia smooth: Kecilkan resolution & buang buffer
-    videoCapture.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-    videoCapture.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-    videoCapture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    # Start AI Thread
+    t_ai = threading.Thread(target=ai_logic_thread, args=(model_path,))
+    t_ai.daemon = True
+    t_ai.start()
 
-    # Start Thread AI kat belakang tab
-    t = threading.Thread(target=ai_worker_thread, args=(model_path,))
-    t.daemon = True
-    t.start()
-
-    print("Sistem Bermula... Tekan 'q' untuk keluar")
+    print("Sistem SMOOTH GILER bermula... Tekan 'q' untuk keluar")
 
     while True:
-        success, frame = videoCapture.read()
-        if not success: break
+        frame = cam.read()
+        latest_frame = frame # Bagi frame kat AI Thread
         
-        latest_frame = frame # Update frame untuk dibaca oleh Thread AI
-
-        # Lukis Overlay (Guna frame asal untuk display)
-        cv2.rectangle(frame, (0, 0), (320, 40), (0, 0, 0), -1)
+        # Lukis info atas skrin
+        cv2.rectangle(frame, (0, 0), (320, 35), (0, 0, 0), -1)
         cv2.putText(frame, latest_result, (10, 25), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow('SMOOTH PREVIEW - ADTEC BP', frame)
+        cv2.imshow('PREVIEW SMOOTH - ISKANDAR', frame)
         
         if cv2.waitKey(1) & 0xFF == ord('q'):
             is_running = False
             break
 
-    videoCapture.release()
+    cam.stop()
     cv2.destroyAllWindows()
     GPIO.cleanup()
-
-if __name__ == "__main__":
-    main()
-GPIO.setup(PUL_PIN, GPIO.OUT)
-GPIO.setup(DIR_PIN, GPIO.OUT)
-
-def gerak_conveyor(steps, delay=0.002):
-    GPIO.output(DIR_PIN, GPIO.HIGH)
-    for _ in range(steps):
-        GPIO.output(PUL_PIN, GPIO.HIGH)
-        time.sleep(delay)
-        GPIO.output(PUL_PIN, GPIO.LOW)
-        time.sleep(delay)
-
-# --- 2. SETUP AI (EDGE IMPULSE) ---
-model_file = "modelfail_anda.eim" 
-
-def main():
-    with ImageImpulseRunner(model_file) as runner:
-        try:
-            model_info = runner.init()
-            print(f"Model [{model_info['project']['name']}] sedia!")
-            
-            videoCapture = cv2.VideoCapture(0)
-            # Set resolution rendah sikit supaya tak lag (640x480)
-            videoCapture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            videoCapture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-            while True:
-                print("\n--- Konveyor Bergerak ---")
-                gerak_conveyor(800) 
-                
-                time.sleep(1) 
-                success, img = videoCapture.read()
-                if not success:
-                    break
-
-                # Proses AI (Fix ValueError dimension)
-                features, img_cropped = runner.get_features_from_image(img)
-                res = runner.classify(features)
-
-                # --- BAHAGIAN CAMERA REVIEW (VISUAL) ---
-                label_display = "Mencari..."
-                score_display = 0
-
-                if "classification" in res:
-                    # Cari result paling tinggi
-                    predictions = res['classification']
-                    best_label = max(predictions, key=predictions.get)
-                    score_display = predictions[best_label]
-                    
-                    if score_display > 0.8:
-                        label_display = f"{best_label.upper()} ({score_display:.2f})"
-                        print(f">>> DETECTED: {label_display}")
-                    else:
-                        label_display = "Tiada Buah/Gagal"
-
-                # Lukis kotak info atas gambar (Review)
-                cv2.rectangle(img, (0, 0), (300, 60), (0, 0, 0), -1) # Background hitam
-                cv2.putText(img, label_display, (10, 40), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-                # Paparkan Window Kamera
-                cv2.imshow('Projek Iskandar - Fruit Sorting AI', img)
-                
-                # Wajib ada waitKey untuk refresh window
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-
-                time.sleep(1) 
-
-        except Exception as e:
-            print(f"Ralat: {e}")
-        finally:
-            GPIO.cleanup()
-            videoCapture.release()
-            cv2.destroyAllWindows()
-            print("Sistem ditutup.")
 
 if __name__ == "__main__":
     main()
