@@ -1,0 +1,48 @@
+import RPi.GPIO as GPIO
+import time
+
+# 1. Definisi Pin (Ikut wiring sebelum ni)
+PUL_PIN = 17  # Pin Physical 11
+DIR_PIN = 27  # Pin Physical 13
+
+# 2. Setup GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(PUL_PIN, GPIO.OUT)
+GPIO.setup(DIR_PIN, GPIO.OUT)
+
+def gerak_conveyor(pusingan, speed_delay, arah):
+    """
+    pusingan: Jumlah step (bergantung pada setting microstep TB6600)
+    speed_delay: Lagi kecil nilai, lagi laju motor pusing
+    arah: 1 untuk depan, 0 untuk belakang
+    """
+    # Set Arah
+    if arah == 1:
+        GPIO.output(DIR_PIN, GPIO.HIGH)
+    else:
+        GPIO.output(DIR_PIN, GPIO.LOW)
+
+    print(f"Konveyor bergerak... Arah: {'Depan' if arah == 1 else 'Belakang'}")
+    
+    try:
+        for i in range(pusingan):
+            GPIO.output(PUL_PIN, GPIO.HIGH)
+            time.sleep(speed_delay)
+            GPIO.output(PUL_PIN, GPIO.LOW)
+            time.sleep(speed_delay)
+    except KeyboardInterrupt:
+        print("\nPergerakan dihentikan!")
+
+# --- MAIN PROGRAM ---
+try:
+    while True:
+        # Contoh: Gerak 1600 step (2 pusingan kalau microstep set 800)
+        # speed_delay 0.0005 adalah sederhana laju
+        gerak_conveyor(1600, 0.0005, 1) 
+        
+        time.sleep(2) # Berhenti 2 saat (untuk proses AI/Webcam nanti)
+        
+except KeyboardInterrupt:
+    print("Program tamat.")
+finally:
+    GPIO.cleanup() # Wajib untuk reset pin GPIO
