@@ -1,0 +1,67 @@
+import cv2
+import os
+import sys, getopt
+import RPi.GPIO as GPIO
+import time
+from edge_impulse_linux.image import ImageImpulseRunner
+
+# --- SETUP HARDWARE (MOTOR) ---
+PUL_PIN = 17  # Pin 11
+DIR_PIN = 27  # Pin 13
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(PUL_PIN, GPIO.OUT)
+GPIO.setup(DIR_PIN, GPIO.OUT)
+
+def gerak_conveyor(steps, delay=0.002):
+    GPIO.output(DIR_PIN, GPIO.HIGH) # Arah depan
+    for _ in range(steps):
+        GPIO.output(PUL_PIN, GPIO.HIGH)
+        time.sleep(delay)
+        GPIO.output(PUL_PIN, GPIO.LOW)
+        time.sleep(delay)
+
+# --- SETUP AI (EDGE IMPULSE) ---
+model_file = "modelfail_anda.eim" # TUKAR KEPADA NAMA FAIL .EIM ANDA
+
+def main():
+    with ImageImpulseRunner(model_file) as runner:
+        try:
+            model_info = runner.init()
+            print(f"Model [{model_info['project']['name']}] sedia!")
+            
+            # Gunakan Webcam USB
+            videoCapture = cv2.VideoCapture(0)
+
+            while True:
+                # 1. Gerakkan konveyor sedikit
+                print("\n--- Konveyor Bergerak ---")
+                gerak_conveyor(800) # Gerak separuh pusingan (jika microstep 1600)
+                
+                # 2. Berhenti dan tangkap gambar
+                time.sleep(1) 
+                success, img = videoCapture.read()
+                if not success:
+                    break
+
+                # 3. Proses Gambar untuk AI
+                features = runner.get_features_from_image(img)
+                res = runner.classify(features)
+
+                # 4. Output Keputusan ke Shell
+                if "classification" in res:
+                    print("HASIL DETECT:")
+                    for label, value in res['classification'].items():
+                        print(f"- {label}: {value:.2f}")
+                        
+                        # Contoh logik sorting mudah
+                        if value > 0.8: # Jika keyakinan > 80%
+                            print(f">>> BUAH DIKESAN: {label.upper()}")
+
+                time.sleep(2) # Tunggu sebelum pusingan seterusnya
+
+        finally:
+            GPIO.cleanup()
+            videoCapture.release()
+
+if __name__ == "__main__":
+    main()
