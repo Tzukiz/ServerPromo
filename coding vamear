@@ -1,67 +1,81 @@
 import cv2
 import os
-import sys, getopt
+import sys
 import RPi.GPIO as GPIO
 import time
 from edge_impulse_linux.image import ImageImpulseRunner
 
-# --- SETUP HARDWARE (MOTOR) ---
-PUL_PIN = 17  # Pin 11
-DIR_PIN = 27  # Pin 13
+# --- 1. SETUP HARDWARE (MECHATRONICS) ---
+PUL_PIN = 17  # GPIO 17 (Physical Pin 11)
+DIR_PIN = 27  # GPIO 27 (Physical Pin 13)
+
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(PUL_PIN, GPIO.OUT)
 GPIO.setup(DIR_PIN, GPIO.OUT)
 
+# Fungsi gerak slow untuk demo pelajar
 def gerak_conveyor(steps, delay=0.002):
-    GPIO.output(DIR_PIN, GPIO.HIGH) # Arah depan
+    GPIO.output(DIR_PIN, GPIO.HIGH) # Arah ke depan
     for _ in range(steps):
         GPIO.output(PUL_PIN, GPIO.HIGH)
         time.sleep(delay)
         GPIO.output(PUL_PIN, GPIO.LOW)
         time.sleep(delay)
 
-# --- SETUP AI (EDGE IMPULSE) ---
-model_file = "modelfail_anda.eim" # TUKAR KEPADA NAMA FAIL .EIM ANDA
+# --- 2. SETUP AI (EDGE IMPULSE) ---
+# Pastikan nama fail .eim ni sama dengan yang kau transfer tadi
+model_file = "modelfail_anda.eim" 
 
 def main():
+    # Guna 'with' supaya runner tutup sendiri kalau error
     with ImageImpulseRunner(model_file) as runner:
         try:
             model_info = runner.init()
             print(f"Model [{model_info['project']['name']}] sedia!")
             
-            # Gunakan Webcam USB
+            # Start Webcam USB
             videoCapture = cv2.VideoCapture(0)
 
             while True:
-                # 1. Gerakkan konveyor sedikit
-                print("\n--- Konveyor Bergerak ---")
-                gerak_conveyor(800) # Gerak separuh pusingan (jika microstep 1600)
+                print("\n--- Konveyor Bergerak (Mencari Buah) ---")
+                # Gerak 800 step (separuh pusingan jika microstep 1600)
+                gerak_conveyor(800) 
                 
-                # 2. Berhenti dan tangkap gambar
+                # Berhenti sekejap untuk ambil gambar yang jelas (tak blur)
                 time.sleep(1) 
                 success, img = videoCapture.read()
                 if not success:
+                    print("Gagal akses kamera!")
                     break
 
-                # 3. Proses Gambar untuk AI
-                features = runner.get_features_from_image(img)
+                # --- BAHAGIAN FIX ERROR DISINI ---
+                # Kita pecahkan tuple: features (data AI) & img_cropped (gambar)
+                features, img_cropped = runner.get_features_from_image(img)
+                
+                # Sekarang hantar 'features' sahaja ke classify
                 res = runner.classify(features)
+                # ---------------------------------
 
-                # 4. Output Keputusan ke Shell
                 if "classification" in res:
-                    print("HASIL DETECT:")
-                    for label, value in res['classification'].items():
+                    print("HASIL ANALISIS AI:")
+                    # Cari label yang paling tinggi peratusannya
+                    predictions = res['classification']
+                    for label, value in predictions.items():
                         print(f"- {label}: {value:.2f}")
                         
-                        # Contoh logik sorting mudah
-                        if value > 0.8: # Jika keyakinan > 80%
-                            print(f">>> BUAH DIKESAN: {label.upper()}")
+                        # Logik sorting: Jika keyakinan lebih 80%
+                        if value > 0.8:
+                            print(f">>> OUTPUT: {label.upper()} DIKESAN")
 
-                time.sleep(2) # Tunggu sebelum pusingan seterusnya
+                # Tunggu 2 saat sebelum kitaran seterusnya
+                time.sleep(2) 
 
+        except Exception as e:
+            print(f"Ralat berlaku: {e}")
         finally:
-            GPIO.cleanup()
+            GPIO.cleanup() # Reset pin GPIO supaya tak panas
             videoCapture.release()
+            print("Sistem ditutup dengan selamat.")
 
 if __name__ == "__main__":
     main()
