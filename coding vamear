@@ -9,7 +9,101 @@ from edge_impulse_linux.image import ImageImpulseRunner
 PUL_PIN = 17 
 DIR_PIN = 27 
 
+GPIO.setmode(GPIO.BCM)import cv2
+import threading
+import RPi.GPIO as GPIO
+import time
+from edge_impulse_linux.image import ImageImpulseRunner
+
+# --- 1. SETUP HARDWARE ---
+PUL_PIN = 17 
+DIR_PIN = 27 
 GPIO.setmode(GPIO.BCM)
+GPIO.setup(PUL_PIN, GPIO.OUT)
+GPIO.setup(DIR_PIN, GPIO.OUT)
+
+# Variable global untuk simpan hasil AI & Frame terbaru
+latest_result = "Mencari..."
+latest_frame = None
+is_running = True
+
+def gerak_conveyor(steps, delay=0.002):
+    GPIO.output(DIR_PIN, GPIO.HIGH)
+    for _ in range(steps):
+        GPIO.output(PUL_PIN, GPIO.HIGH)
+        time.sleep(delay)
+        GPIO.output(PUL_PIN, GPIO.LOW)
+        time.sleep(delay)
+
+# --- 2. THREAD AI & LOGIK PROJEK ---
+def ai_worker_thread(model_file):
+    global latest_result, latest_frame, is_running
+    
+    with ImageImpulseRunner(model_file) as runner:
+        runner.init()
+        while is_running:
+            if latest_frame is not None:
+                # Gerak motor dulu
+                gerak_conveyor(400) # Gerak sikit-sikit
+                
+                # Proses AI (Fix ValueError dimension)
+                features, img_cropped = runner.get_features_from_image(latest_frame)
+                res = runner.classify(features)
+                
+                if "classification" in res:
+                    predictions = res['classification']
+                    best_label = max(predictions, key=predictions.get)
+                    score = predictions[best_label]
+                    
+                    if score > 0.7:
+                        latest_result = f"{best_label.upper()} ({score:.2f})"
+                    else:
+                        latest_result = "Tiada Objek"
+                
+                time.sleep(0.1) # Rehat sikit untuk elak overheat
+
+# --- 3. MAIN THREAD (CAMERA DISPLAY) ---
+def main():
+    global latest_frame, is_running, latest_result
+    
+    model_path = "modelfail_anda.eim" # TUKAR SINI
+    videoCapture = cv2.VideoCapture(0)
+    
+    # Rahsia smooth: Kecilkan resolution & buang buffer
+    videoCapture.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    videoCapture.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    videoCapture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # Start Thread AI kat belakang tab
+    t = threading.Thread(target=ai_worker_thread, args=(model_path,))
+    t.daemon = True
+    t.start()
+
+    print("Sistem Bermula... Tekan 'q' untuk keluar")
+
+    while True:
+        success, frame = videoCapture.read()
+        if not success: break
+        
+        latest_frame = frame # Update frame untuk dibaca oleh Thread AI
+
+        # Lukis Overlay (Guna frame asal untuk display)
+        cv2.rectangle(frame, (0, 0), (320, 40), (0, 0, 0), -1)
+        cv2.putText(frame, latest_result, (10, 25), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        cv2.imshow('SMOOTH PREVIEW - ADTEC BP', frame)
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            is_running = False
+            break
+
+    videoCapture.release()
+    cv2.destroyAllWindows()
+    GPIO.cleanup()
+
+if __name__ == "__main__":
+    main()
 GPIO.setup(PUL_PIN, GPIO.OUT)
 GPIO.setup(DIR_PIN, GPIO.OUT)
 
