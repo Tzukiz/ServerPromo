@@ -2,6 +2,8 @@ import cv2
 import threading
 import RPi.GPIO as GPIO
 import time
+import os
+import sys
 from edge_impulse_linux.image import ImageImpulseRunner
 from RPLCD.i2c import CharLCD
 
@@ -17,13 +19,14 @@ try:
     lcd.clear()
     lcd.write_string("Sistem Ready...")
 except:
-    print("LCD tak dikesan!")
+    print("LCD tak dikesan! Check I2C.")
 
+# Global variables
 latest_frame = None
 latest_result = "Mencari..."
 is_running = True
 
-# --- THREAD 1: KAMERA ---
+# --- THREAD 1: KAMERA (SMOOTH STREAM) ---
 class CameraStream:
     def __init__(self):
         self.stream = cv2.VideoCapture(0)
@@ -48,18 +51,17 @@ class CameraStream:
         self.stopped = True
         self.stream.release()
 
-# --- THREAD 2: AI & MOTOR (DEBUG VERSION) ---
+# --- THREAD 2: LOGIK AI (OBJECT DETECTION) & MOTOR ---
 def ai_logic_thread(model_path):
     global latest_result, latest_frame, is_running
     
     with ImageImpulseRunner(model_path) as runner:
         model_info = runner.init()
-        # CETAK LABEL YANG ADA DALAM MODEL KAU KAT SHELL
-        print(f"Model sedia! Label yang dikesan: {model_info['model_parameters']['labels']}")
+        print("Berjaya load model AI!")
         
         while is_running:
             if latest_frame is not None:
-                # Gerak motor sikit
+                # A. Gerak Motor (Sikit-sikit)
                 GPIO.output(DIR_PIN, GPIO.HIGH)
                 for _ in range(400): 
                     GPIO.output(PUL_PIN, GPIO.HIGH)
@@ -67,42 +69,46 @@ def ai_logic_thread(model_path):
                     GPIO.output(PUL_PIN, GPIO.LOW)
                     time.sleep(0.002)
 
-                # AI Fikir
+                # B. Proses AI (Guna Logic Bounding Boxes)
                 features, _ = runner.get_features_from_image(latest_frame)
                 res = runner.classify(features)
                 
-                if "classification" in res:
-                    predictions = res['classification']
-                    
-                    # --- DEBUG: Cetak semua peratusan kat Shell ---
-                    print("\n--- Raw Data AI ---")
-                    for label, score in predictions.items():
-                        print(f"{label}: {score:.2f}")
-                    
-                    # Cari yang paling tinggi
-                    best_label = max(predictions, key=predictions.get)
-                    best_score = predictions[best_label]
-                    
-                    # KITA TURUNKAN THRESHOLD KE 0.4 BIAR DIA SENSITIF SIKIT
-                    if best_score > 0.4:
-                        latest_result = f"{best_label.upper()}"
-                        lcd.clear()
-                        lcd.write_string(f"Item: {latest_result}\nConf: {best_score:.2f}")
-                    else:
-                        latest_result = "Scanning..."
-                        lcd.clear()
-                        lcd.write_string("Mencari...")
+                found_something = False
+                
+                # Cek hasil bounding boxes
+                if "bounding_boxes" in res["result"]:
+                    for bb in res["result"]["bounding_boxes"]:
+                        label = bb['label']
+                        accuracy = bb['value']
 
-            time.sleep(0.5)
+                        if accuracy > 0.6: # Set threshold 60%
+                            latest_result = f"{label.upper()}"
+                            lcd.clear()
+                            lcd.write_string(f"Jumpa: {latest_result}\nAcc: {accuracy:.2f}")
+                            print(f"Detect: {label} ({accuracy:.2f})")
+                            found_something = True
+                            break # Ambil satu je yang paling yakin
+                
+                if not found_something:
+                    latest_result = "Scanning..."
+                    # lcd.clear()
+                    # lcd.write_string("Mencari...")
 
-# --- MAIN DISPLAY ---
+            time.sleep(0.1)
+
+# --- MAIN DISPLAY THREAD ---
 def main():
     global latest_frame, is_running, latest_result
     
-    model_path = "/home/iskandar/Aibaru.eim"
+    modelfile = "/home/iskandar/telo.eim" # Nama fail kau
+    
+    if not os.path.exists(modelfile):
+        print(f"Error: Fail {modelfile} tak jumpa!")
+        return
+
     cam = CameraStream().start()
     
-    t_ai = threading.Thread(target=ai_logic_thread, args=(model_path,), daemon=True)
+    t_ai = threading.Thread(target=ai_logic_thread, args=(modelfile,), daemon=True)
     t_ai.start()
 
     while True:
@@ -110,12 +116,12 @@ def main():
         if frame is None: continue
         latest_frame = frame
         
-        # Display overlay kat Monitor
+        # Display overlay kat skrin monitor
         cv2.rectangle(frame, (0, 0), (320, 35), (0, 0, 0), -1)
         cv2.putText(frame, f"AI: {latest_result}", (10, 25), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow('DEBUG AI - ISKANDAR', frame)
+        cv2.imshow('AI Object Detection - Iskandar', frame)
         
         if cv2.waitKey(1) & 0xFF == ord('q'):
             is_running = False
@@ -124,6 +130,8 @@ def main():
     cam.stop()
     cv2.destroyAllWindows()
     GPIO.cleanup()
+    lcd.clear()
+    lcd.write_string("Sistem Off")
 
 if __name__ == "__main__":
     main()
