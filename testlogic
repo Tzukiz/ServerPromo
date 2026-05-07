@@ -1,0 +1,107 @@
+import RPi.GPIO as GPIO
+import time
+import threading
+
+# --- 1. SETUP PIN ---
+PUL_PIN = 17  # Pin Pulse Stepper
+DIR_PIN = 27  # Pin Direction Stepper
+LAMP_G   = 24 # Relay Lampu Hijau
+LAMP_R   = 23 # Relay Lampu Merah
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup([PUL_PIN, DIR_PIN, LAMP_G, LAMP_R], GPIO.OUT)
+
+# Pastikan Relay OFF (Active Low: HIGH = OFF)
+GPIO.output(LAMP_G, GPIO.HIGH)
+GPIO.output(LAMP_R, GPIO.HIGH)
+
+# Status Global
+motor_berjalan = True
+is_running = True
+
+# --- THREAD MOTOR (Gerak Non-Stop) ---
+def motor_thread():
+    global motor_berjalan, is_running
+    GPIO.output(DIR_PIN, GPIO.HIGH) # Set arah depan
+    
+    while is_running:
+        if motor_berjalan:
+            # Hasilkan denyutan pusingan
+            GPIO.output(PUL_PIN, GPIO.HIGH)
+            time.sleep(0.0005) # Kelajuan lancar NEMA 23 kau
+            GPIO.output(PUL_PIN, GPIO.LOW)
+            time.sleep(0.0005)
+        else:
+            # Motor "Pause" sekejap masa proses barang
+            time.sleep(0.1)
+
+# --- FUNGSI PROSES SIMULASI ---
+def proses_barang(jenis):
+    global motor_berjalan
+    
+    # 1. Hentikan Konveyor
+    motor_berjalan = False
+    print("\n" + "="*40)
+    print("[SENSOR] BARANG DIKESAN! KONVEYOR BERHENTI.")
+    print("[SISTEM] Sedang memeriksa jenis buah...")
+    time.sleep(1.5) # Simulasi masa kamera berfikir
+    
+    if jenis == 'r':
+        print(">>> HASIL: BUAH A (TELUR)")
+        print(">>> STATUS: [LAMPU HIJAU NYALA]")
+        print(">>> TINDAKAN: GATE A DIBUKA (VIRTUAL)")
+        
+        GPIO.output(LAMP_G, GPIO.LOW) # Hijau ON
+        time.sleep(10) # Kekal 10 saat
+        
+        print(">>> TINDAKAN: GATE A DITUTUP (VIRTUAL)")
+        GPIO.output(LAMP_G, GPIO.HIGH) # Hijau OFF
+        
+    elif jenis == 'b':
+        print(">>> HASIL: BUAH B (OAT)")
+        print(">>> STATUS: [LAMPU MERAH NYALA]")
+        print(">>> TINDAKAN: GATE B DIBUKA (VIRTUAL)")
+        
+        GPIO.output(LAMP_R, GPIO.LOW) # Merah ON
+        time.sleep(10) # Kekal 10 saat
+        
+        print(">>> TINDAKAN: GATE B DITUTUP (VIRTUAL)")
+        GPIO.output(LAMP_R, GPIO.HIGH) # Merah OFF
+
+    # 2. Gerak semula
+    print("[SISTEM] Proses Selesai. Konveyor mula bergerak.")
+    print("="*40 + "\n")
+    motor_berjalan = True
+
+# --- MAIN PROGRAM ---
+print("=== SISTEM KONVEYOR INDUSTRI ADTEC (SIMULASI) ===")
+print("Kawalan Manual:")
+print(" [r] - Simulasi Detect Buah A (Telur)")
+print(" [b] - Simulasi Detect Buah B (Oat)")
+print(" [q] - Tamatkan Program")
+print("-" * 50)
+
+# Jalankan pusingan motor di belakang tab
+t_motor = threading.Thread(target=motor_thread, daemon=True)
+t_motor.start()
+
+try:
+    while True:
+        pilihan = input("Tunggu input: ").lower()
+        
+        if pilihan == 'r' or pilihan == 'b':
+            proses_barang(pilihan)
+        elif pilihan == 'q':
+            print("Menutup sistem...")
+            is_running = False
+            break
+        else:
+            print("Input tidak sah! Guna [r], [b], atau [q].")
+            
+except KeyboardInterrupt:
+    is_running = False
+
+finally:
+    is_running = False
+    GPIO.cleanup()
+    print("GPIO Cleanup. Program Tamat.")
