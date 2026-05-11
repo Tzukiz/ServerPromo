@@ -1,0 +1,52 @@
+import RPi.GPIO as GPIO
+import time
+
+# --- 1. SET PIN GPIO ---
+# Ikut wiring yang kita bincang tadi
+PUL_PIN = 17    # Pin Pulse untuk TB6600
+DIR_PIN = 27    # Pin Direction untuk TB6600
+SENSOR_PIN = 22 # Pin Signal Hitam dari Sensor E18-D80NK
+
+# --- 2. SETUP GPIO ---
+GPIO.setmode(GPIO.BCM)
+GPIO.setup([PUL_PIN, DIR_PIN], GPIO.OUT)
+# Gunakan PUD_UP sebab sensor kau jenis NPN NO
+GPIO.setup(SENSOR_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+# Set arah pusingan (HIGH atau LOW ikut kesesuaian konveyor kau)
+GPIO.output(DIR_PIN, GPIO.HIGH)
+
+def gerakkan_motor():
+    """Fungsi untuk bagi 1 pulse kepada motor"""
+    GPIO.output(PUL_PIN, GPIO.HIGH)
+    time.sleep(0.0005) # Kelajuan motor (lagi kecil nombor, lagi laju)
+    GPIO.output(PUL_PIN, GPIO.LOW)
+    time.sleep(0.0005)
+
+print("=== SISTEM KONVEYOR BERMULA ===")
+print("Menunggu barang lalu di sensor...")
+
+try:
+    while True:
+        # Check sensor (Logic LOW bermaksud ada barang untuk NPN NO)
+        if GPIO.input(SENSOR_PIN) == GPIO.LOW:
+            print("\n[SENSOR] Barang dikesan!")
+            print("[TERMINAL] Camera detect...")
+            
+            # Berhenti selama 3 saat (simulasi proses kamera/AI)
+            time.sleep(3)
+            
+            print("[SISTEM] Proses selesai. Konveyor jalan semula.")
+            # Tunggu barang tu lepas dari sensor supaya tak 'detect' berkali-kali
+            while GPIO.input(SENSOR_PIN) == GPIO.LOW:
+                time.sleep(0.1)
+                
+        else:
+            # Jika takde barang, motor pusing terus
+            gerakkan_motor()
+
+except KeyboardInterrupt:
+    print("\nSistem dihentikan oleh pengguna.")
+finally:
+    GPIO.cleanup()
+    print("GPIO Cleanup selesai."
