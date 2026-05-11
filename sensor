@@ -1,52 +1,70 @@
 import RPi.GPIO as GPIO
 import time
 
-# --- 1. SET PIN GPIO ---
-# Ikut wiring yang kita bincang tadi
-PUL_PIN = 17    # Pin Pulse untuk TB6600
-DIR_PIN = 27    # Pin Direction untuk TB6600
-SENSOR_PIN = 22 # Pin Signal Hitam dari Sensor E18-D80NK
+# --- 1. KONFIGURASI PIN ---
+PUL_PIN = 17     # Pin Step (TB6600)
+DIR_PIN = 27     # Pin Direction (TB6600)
+SENSOR_PIN = 22  # Pin Signal Sensor (Wayar Hitam E18-D80NK)
 
-# --- 2. SETUP GPIO ---
+# --- 2. KONFIGURASI PARAMETER ---
+# Tukar nilai ni ikut keperluan konveyor kau
+KELAJUAN = 0.001       # Lagi kecil, lagi laju (Contoh: 0.0005)
+DELAY_PROSES = 3       # Masa berhenti untuk 'Camera Detect' (saat)
+KICKSTART_STEPS = 3000 # Jumlah langkah untuk alihkan barang dari sensor
+
+# --- 3. SETUP GPIO ---
 GPIO.setmode(GPIO.BCM)
 GPIO.setup([PUL_PIN, DIR_PIN], GPIO.OUT)
-# Gunakan PUD_UP sebab sensor kau jenis NPN NO
+# Wajib PUD_UP untuk sensor NPN NO
 GPIO.setup(SENSOR_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# Set arah pusingan (HIGH atau LOW ikut kesesuaian konveyor kau)
+# Set arah pusingan asal
 GPIO.output(DIR_PIN, GPIO.HIGH)
 
-def gerakkan_motor():
-    """Fungsi untuk bagi 1 pulse kepada motor"""
-    GPIO.output(PUL_PIN, GPIO.HIGH)
-    time.sleep(0.0005) # Kelajuan motor (lagi kecil nombor, lagi laju)
-    GPIO.output(PUL_PIN, GPIO.LOW)
-    time.sleep(0.0005)
+def gerakkan_motor(steps):
+    """Fungsi untuk menggerakkan motor sebanyak jumlah langkah tertentu"""
+    for _ in range(steps):
+        GPIO.output(PUL_PIN, GPIO.HIGH)
+        time.sleep(KELAJUAN)
+        GPIO.output(PUL_PIN, GPIO.LOW)
+        time.sleep(KELAJUAN)
 
-print("=== SISTEM KONVEYOR BERMULA ===")
-print("Menunggu barang lalu di sensor...")
+def satu_step():
+    """Fungsi untuk satu langkah pusingan berterusan"""
+    GPIO.output(PUL_PIN, GPIO.HIGH)
+    time.sleep(KELAJUAN)
+    GPIO.output(PUL_PIN, GPIO.LOW)
+    time.sleep(KELAJUAN)
+
+print("-" * 40)
+print("SISTEM KONVEYOR PROJEK MEKATRONIK")
+print("Status: Berjalan...")
+print("-" * 40)
 
 try:
     while True:
-        # Check sensor (Logic LOW bermaksud ada barang untuk NPN NO)
+        # 1. Check Sensor (NPN NO: LOW bermaksud ada barang)
         if GPIO.input(SENSOR_PIN) == GPIO.LOW:
-            print("\n[SENSOR] Barang dikesan!")
-            print("[TERMINAL] Camera detect...")
+            print("\n[!] BARANG DIKESAN")
+            print("[...] Berhenti untuk proses kamera.")
             
-            # Berhenti selama 3 saat (simulasi proses kamera/AI)
-            time.sleep(3)
+            # 2. MOTOR BERHENTI (Delay simulasi AI/Kamera)
+            time.sleep(DELAY_PROSES)
+            print("[OK] Camera detect selesai.")
             
-            print("[SISTEM] Proses selesai. Konveyor jalan semula.")
-            # Tunggu barang tu lepas dari sensor supaya tak 'detect' berkali-kali
-            while GPIO.input(SENSOR_PIN) == GPIO.LOW:
-                time.sleep(0.1)
-                
+            # 3. KICKSTART (Aliran keluar barang)
+            # Motor pusing tanpa check sensor supaya barang lepas dari kanta
+            print(f"[>>>] Mengalihkan barang ({KICKSTART_STEPS} steps)...")
+            gerakkan_motor(KICKSTART_STEPS)
+            
+            print("[READY] Mencari barang seterusnya...")
+            
         else:
-            # Jika takde barang, motor pusing terus
-            gerakkan_motor()
+            # 4. Jalan terus jika takde barang
+            satu_step()
 
 except KeyboardInterrupt:
-    print("\nSistem dihentikan oleh pengguna.")
+    print("\n[!] Amaran: Sistem dihentikan secara manual.")
 finally:
     GPIO.cleanup()
-    print("GPIO Cleanup selesai."
+    print("[INFO] GPIO Cleanup selesai. Sistem ditutup.")
